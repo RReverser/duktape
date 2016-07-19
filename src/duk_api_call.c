@@ -299,6 +299,7 @@ DUK_EXTERNAL void duk_new(duk_context *ctx, duk_idx_t nargs) {
 			 * initial constructor is not strictly necessary, but a
 			 * nice sanity check.
 			 */
+			/* FIXME: why wouldn't a lightfunc be constructable? */
 			goto not_constructable;
 		}
 		if (!DUK_HOBJECT_HAS_BOUNDFUNC(cons)) {

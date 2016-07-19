@@ -21,6 +21,7 @@
 import os
 import sys
 import re
+import traceback
 import json
 import yaml
 import math
@@ -620,6 +621,97 @@ def metadata_normalize_missing_strings(meta, user_meta):
 			s['_auto_add_user'] = True
 			meta['strings'].append(s)
 
+# Convert built-in function properties into lightfuncs where applicable.
+def metadata_convert_lightfuncs(meta):
+	# FIXME: share
+	def _findObject(objid):
+		for i,t in enumerate(meta['objects']):
+			if t['id'] == objid:
+				return t, i
+		return None, None
+
+	for o in meta['objects']:
+		for p in o['properties']:
+			v = p['value']
+			ptype = None
+			if isinstance(v, dict):
+				ptype = p['value']['type']
+			if ptype != 'object':
+				continue
+			targ, targ_idx = _findObject(p['value']['id'])
+
+			reasons = []
+			if not targ.get('callable', False):
+				reasons.append('not-callable')
+			if targ.get('constructable', False):
+				# FIXME: why aren't lightfuncs constructable...
+				# This makes it difficult for user functions!
+				reasons.append('constructable')
+
+			for p2 in targ['properties']:
+				# Don't convert if function has more properties than
+				# we're willing to sacrifice.
+				print('   - Check %r . %s' % (o.get('id', None), p2['key']))
+				if p2['key'] not in [ 'length', 'name' ]:
+					reasons.append('nonallowed-property')
+
+			# FIXME: p['allowLightfunc: false']?
+			if p['key'] in [ 'eval', 'resume', 'yield' ]:
+				reasons.append('hack')
+
+			if targ.has_key('length'):
+				lf_len = targ['length']
+			else:
+				lf_len = 0
+			if targ.has_key('magic'):
+				try:
+					# Magic values which resolve to 'bidx' indices cannot
+					# be resolved here yet, FIXME: map not yet ready.
+					lf_magic = resolve_magic(targ.get('magic'), {})  # FIXME: bidx...
+					print('resolved magic ok -> %r' % lf_magic)
+				except Exception, e:
+					print(e)
+					reasons.append('magic-resolve-failed')
+					lf_magic = 0xffffffff  # dummy
+			else:
+				lf_magic = 0
+			if targ.get('varargs', True):
+				lf_nargs = None
+				lf_varargs = True
+			else:
+				lf_nargs = targ['nargs']
+				lf_varargs = False
+
+			if lf_len < 0 or lf_len > 15:
+				print('lf_len out of bounds: %r' % lf_len)
+				reasons.append('len-bounds')
+			if lf_magic < 0 or lf_magic > 0xff:
+				# XXX: lightfunc magic is technically -0x80 to 0x7f,
+				# but resolve_magic() returns a forced unsigned value.
+				# FIXME: limit to [0,0x7f]?
+				print('lf_magic out of bounds: %r' % lf_magic)
+				reasons.append('magic-bounds')
+			if not lf_varargs and (lf_nargs < 0 or lf_nargs > 14):
+				print('lf_nargs out of bounds: %r' % lf_nargs)
+				reasons.append('nargs-bounds')
+
+			if len(reasons) > 0:
+				print(' - Don\'t convert to lightfunc: %r %r (%r): %r' % (o.get('id', None), p.get('key', None), p['value']['id'], reasons))
+				
+				continue
+
+			p_id = p['value']['id']
+			p['value'] = {
+				'type': 'lightfunc',
+				'native': targ['native'],
+				'length': lf_len,
+				'magic': lf_magic,
+				'nargs': lf_nargs,
+				'varargs': lf_varargs  # FIXME only present whe needed?
+			}
+			print(' - Convert to lightfunc: %r %r (%r) -> %r' % (o.get('id', None), p.get('key', None), p_id, p['value']))
+
+
 # Detect objects not reachable from any object with a 'bidx'.  This is usually
 # a user error because such objects can't be reached at runtime so they're
 # useless in RAM or ROM init data.
@@ -883,6 +975,11 @@ def load_metadata(opts, rom=False, build_info=None):
 	if rom:
 		metadata_normalize_rom_property_attributes(meta)
 
+	# Convert built-in function properties into lightfuncs if requested
+	# and function is eligible.
+	if rom and True:  # FIXME
+		metadata_convert_lightfuncs(meta)
+
 	# Create a list of objects needing a 'bidx'.  This is now just
 	# based on the 'builtins' metadata list but could be dynamically
 	# scanned somehow.  Ensure 'objects' and 'objects_bidx' match
@@ -1121,7 +1218,7 @@ def resolve_magic(elem, objid_to_bidx):
 		v = int(elem)
 		if not (v >= -0x8000 and v <= 0x7fff):
 			raise Exception('invalid plain value for magic: %s' % repr(v))
-		# Magic is a 16-bit signed value, but convert to 16-bit signed
+		# Magic is a 16-bit signed value, but convert to 16-bit unsigned
 		# for encoding
 		return v & 0xffff
 	if not isinstance(elem, dict):
@@ -1772,6 +1869,9 @@ def get_ramobj_native_func_maps(meta):
 					target = metadata_lookup_object(meta, val['id'])
 					if target.has_key('native'):
 						native_funcs_found[target['native']] = True
+				if val['type'] == 'lightfunc':
+					raise Exception('no lightfunc support for RAM initializer now')
+
 	for idx,k in enumerate(sorted(native_funcs_found.keys())):
 		native_funcs.append(k)  # native func names
 		natfunc_name_to_natidx[k] = idx
@@ -1946,6 +2046,9 @@ def rom_get_value_initializer(meta, val, bi_str_map, bi_obj_map):
 		elif v['type'] == 'undefined':
 			init_type = 'duk_rom_tval_undefined'
 			init_lit = 'DUK__TVAL_UNDEFINED()'
+		elif v['type'] == 'null':
+			init_type = 'duk_rom_tval_null'
+			init_lit = 'DUK__TVAL_UNDEFINED()'
 		elif v['type'] == 'object':
 			init_type = 'duk_rom_tval_object'
 			init_lit = 'DUK__TVAL_OBJECT(&%s)' % bi_obj_map[v['id']]
@@ -1953,7 +2056,28 @@ def rom_get_value_initializer(meta, val, bi_str_map, bi_obj_map):
 			getter_object = metadata_lookup_object(meta, v['getter_id'])
 			setter_object = metadata_lookup_object(meta, v['setter_id'])
 			init_type = 'duk_rom_tval_accessor'
-			init_lit = '{ (const duk_hobject *) &%s, (const duk_hobject *) &%s }' % (bi_obj_map[getter_object['id']], bi_obj_map[setter_object['id']])
+			init_lit = 'DUK__TVAL_ACCESSOR(&%s, &%s)' % (bi_obj_map[getter_object['id']], bi_obj_map[setter_object['id']])
+
+		elif v['type'] == 'lightfunc':
+			# Match DUK_LFUNC_FLAGS_PACK() in duk_tval.h.
+			if v.has_key('length'):
+				assert(v['length'] >= 0 and v['length'] <= 15)
+				lf_length = v['length']
+			else:
+				lf_length = 0
+			if v.get('varargs', True):
+				lf_nargs = 15  # varargs marker
+			else:
+				assert(v['nargs'] >= 0 and v['nargs'] <= 14)
+				lf_nargs = v['nargs']
+			if v.has_key('magic'):
+				assert(v['magic'] >= -0x80 and v['magic'] <= 0x7f)
+				lf_magic = v['magic'] & 0xff
+			else:
+				lf_magic = 0
+			lf_flags = (lf_magic << 8) + (lf_length << 4) + lf_nargs
+			init_type = 'duk_rom_tval_lightfunc'
+			init_lit = 'DUK__TVAL_LIGHTFUNC(%s, %dL)' % (v['native'], lf_flags)
 		else:
 			raise Exception('unhandled value: %r' % val)
 	else:
@@ -2165,11 +2289,17 @@ def rom_emit_object_initializer_types_and_macros(genc):
 	genc.emitLine('\t{ { { { (heaphdr_flags), (refcount), NULL, NULL }, (duk_uint8_t *) DUK_LOSE_CONST(props), (duk_hobject *) DUK_LOSE_CONST(iproto), (esize), (enext), (asize), (hsize) }, (nativefunc), (duk_int16_t) (nargs), (duk_int16_t) (magic) } }')
 	genc.emitLine('#endif  /* DUK_USE_HEAPPTR16 */')
 
+	# Initializer typedef for a dummy function pointer.  ROM support assumes
+	# function pointers are 32 bits.  Using a dummy function pointer type
+	# avoids function pointer to normal pointer cast which emits warnings.
+	genc.emitLine('typedef void (*duk_rom_funcptr)(void);')
+
 	# Emit duk_tval structs.  This gets a bit messier with packed/unpacked
 	# duk_tval, endianness variants, pointer sizes, etc.
 	genc.emitLine('#if defined(DUK_USE_PACKED_TVAL)')
 	genc.emitLine('typedef struct duk_rom_tval_undefined duk_rom_tval_undefined;')
 	genc.emitLine('typedef struct duk_rom_tval_null duk_rom_tval_null;')
+	genc.emitLine('typedef struct duk_rom_tval_lightfunc duk_rom_tval_lightfunc;')
 	genc.emitLine('typedef struct duk_rom_tval_boolean duk_rom_tval_boolean;')
 	genc.emitLine('typedef struct duk_rom_tval_number duk_rom_tval_number;')
 	genc.emitLine('typedef struct duk_rom_tval_object duk_rom_tval_object;')
@@ -2182,18 +2312,21 @@ def rom_emit_object_initializer_types_and_macros(genc):
 	genc.emitLine('struct duk_rom_tval_string { const void *ptr; duk_uint32_t hiword; };')
 	genc.emitLine('struct duk_rom_tval_undefined { const void *ptr; duk_uint32_t hiword; };')
 	genc.emitLine('struct duk_rom_tval_null { const void *ptr; duk_uint32_t hiword; };')
+	genc.emitLine('struct duk_rom_tval_lightfunc { const duk_rom_funcptr ptr; duk_uint32_t hiword; };')
 	genc.emitLine('struct duk_rom_tval_boolean { duk_uint32_t dummy; duk_uint32_t hiword; };')
 	genc.emitLine('#elif defined(DUK_USE_DOUBLE_BE)')
 	genc.emitLine('struct duk_rom_tval_object { duk_uint32_t hiword; const void *ptr; };')
 	genc.emitLine('struct duk_rom_tval_string { duk_uint32_t hiword; const void *ptr; };')
 	genc.emitLine('struct duk_rom_tval_undefined { duk_uint32_t hiword; const void *ptr; };')
 	genc.emitLine('struct duk_rom_tval_null { duk_uint32_t hiword; const void *ptr; };')
+	genc.emitLine('struct duk_rom_tval_lightfunc { duk_uint32_t hiword; const duk_rom_funcptr ptr; };')
 	genc.emitLine('struct duk_rom_tval_boolean { duk_uint32_t hiword; duk_uint32_t dummy; };')
 	genc.emitLine('#elif defined(DUK_USE_DOUBLE_ME)')
 	genc.emitLine('struct duk_rom_tval_object { duk_uint32_t hiword; const void *ptr; };')
 	genc.emitLine('struct duk_rom_tval_string { duk_uint32_t hiword; const void *ptr; };')
 	genc.emitLine('struct duk_rom_tval_undefined { duk_uint32_t hiword; const void *ptr; };')
 	genc.emitLine('struct duk_rom_tval_null { duk_uint32_t hiword; const void *ptr; };')
+	genc.emitLine('struct duk_rom_tval_lightfunc { duk_uint32_t hiword; duk_rom_funcptr ptr; };')
 	genc.emitLine('struct duk_rom_tval_boolean { duk_uint32_t hiword; duk_uint32_t dummy; };')
 	genc.emitLine('#else')
 	genc.emitLine('#error invalid endianness defines')
@@ -2221,6 +2354,8 @@ def rom_emit_object_initializer_types_and_macros(genc):
 	genc.emitLine('struct duk_rom_tval_object { duk_small_uint_t tag; duk_small_uint_t extra; const duk_heaphdr *val; };')
 	genc.emitLine('typedef struct duk_rom_tval_string duk_rom_tval_string;')
 	genc.emitLine('struct duk_rom_tval_string { duk_small_uint_t tag; duk_small_uint_t extra; const duk_heaphdr *val; };')
+	genc.emitLine('typedef struct duk_rom_tval_lightfunc duk_rom_tval_lightfunc;')
+	genc.emitLine('struct duk_rom_tval_lightfunc { duk_small_uint_t tag; duk_small_uint_t extra; const duk_rom_funcptr ptr; };')
 	genc.emitLine('typedef struct duk_rom_tval_accessor duk_rom_tval_accessor;')
 	genc.emitLine('struct duk_rom_tval_accessor { const duk_hobject *get; const duk_hobject *set; };')
 	genc.emitLine('#endif  /* DUK_USE_PACKED_TVAL */')
@@ -2245,18 +2380,21 @@ def rom_emit_object_initializer_types_and_macros(genc):
 	genc.emitLine('#if defined(DUK_USE_DOUBLE_LE)')
 	genc.emitLine('#define DUK__TVAL_UNDEFINED() { (const void *) NULL, (DUK_TAG_UNDEFINED << 16) }')
 	genc.emitLine('#define DUK__TVAL_NULL() { (const void *) NULL, (DUK_TAG_NULL << 16) }')
+	genc.emitLine('#define DUK__TVAL_LIGHTFUNC(func,flags) { (const void *) (func), (DUK_TAG_LIGHTFUNC << 16) + (flags) }')
 	genc.emitLine('#define DUK__TVAL_BOOLEAN(bval) { 0, (DUK_TAG_BOOLEAN << 16) + (bval) }')
 	genc.emitLine('#define DUK__TVAL_OBJECT(ptr) { (const void *) (ptr), (DUK_TAG_OBJECT << 16) }')
 	genc.emitLine('#define DUK__TVAL_STRING(ptr) { (const void *) (ptr), (DUK_TAG_STRING << 16) }')
 	genc.emitLine('#elif defined(DUK_USE_DOUBLE_BE)')
 	genc.emitLine('#define DUK__TVAL_UNDEFINED() { (DUK_TAG_UNDEFINED << 16), (const void *) NULL }')
 	genc.emitLine('#define DUK__TVAL_NULL() { (DUK_TAG_NULL << 16), (const void *) NULL }')
+	genc.emitLine('#define DUK__TVAL_LIGHTFUNC(func,flags) { (DUK_TAG_LIGHTFUNC << 16) + (flags), (const duk_rom_funcptr) (func) }')
 	genc.emitLine('#define DUK__TVAL_BOOLEAN(bval) { (DUK_TAG_BOOLEAN << 16) + (bval), 0 }')
 	genc.emitLine('#define DUK__TVAL_OBJECT(ptr) { (DUK_TAG_OBJECT << 16), (const void *) (ptr) }')
 	genc.emitLine('#define DUK__TVAL_STRING(ptr) { (DUK_TAG_STRING << 16), (const void *) (ptr) }')
 	genc.emitLine('#elif defined(DUK_USE_DOUBLE_ME)')
 	genc.emitLine('#define DUK__TVAL_UNDEFINED() { (DUK_TAG_UNDEFINED << 16), (const void *) NULL }')
 	genc.emitLine('#define DUK__TVAL_NULL() { (DUK_TAG_NULL << 16), (const void *) NULL }')
+	genc.emitLine('#define DUK__TVAL_LIGHTFUNC(func,flags) { (DUK_TAG_LIGHTFUNC << 16) + (flags), (const duk_rom_funcptr) (func) }')
 	genc.emitLine('#define DUK__TVAL_BOOLEAN(bval) { (DUK_TAG_BOOLEAN << 16) + (bval), 0 }')
 	genc.emitLine('#define DUK__TVAL_OBJECT(ptr) { (DUK_TAG_OBJECT << 16), (const void *) (ptr) }')
 	genc.emitLine('#define DUK__TVAL_STRING(ptr) { (DUK_TAG_STRING << 16), (const void *) (ptr) }')
@@ -2270,7 +2408,9 @@ def rom_emit_object_initializer_types_and_macros(genc):
 	genc.emitLine('#define DUK__TVAL_BOOLEAN(bval) { DUK_TAG_BOOLEAN, 0, (bval), 0 }')
 	genc.emitLine('#define DUK__TVAL_OBJECT(ptr) { DUK_TAG_OBJECT, 0, (const duk_heaphdr *) (ptr) }')
 	genc.emitLine('#define DUK__TVAL_STRING(ptr) { DUK_TAG_STRING, 0, (const duk_heaphdr *) (ptr) }')
+	genc.emitLine('#define DUK__TVAL_LIGHTFUNC(func,flags) { DUK_TAG_LIGHTFUNC, (flags), (const duk_rom_funcptr) (func) }')
 	genc.emitLine('#endif  /* DUK_USE_PACKED_TVAL */')
+	genc.emitLine('#define DUK__TVAL_ACCESSOR(getter,setter) { (const duk_hobject *) (getter), (const duk_hobject *) (setter) }')
 
 # Emit ROM objects source: the object/function headers themselves, property
 # table structs for different property table sizes/types, and property table
@@ -2641,20 +2781,30 @@ def rom_emit_objects_header(genc, meta):
 
 def emit_header_native_function_declarations(genc, meta):
 	emitted = {}  # To suppress duplicates
-	for o in meta['objects']:
-		if not o.has_key('native'):
-			continue
-		fname = o['native']
-		if emitted.has_key(fname):
-			continue  # already emitted, suppress duplicate
-		emitted[fname] = True
+	funclist = []
+	def _emit(fname):
+		if not emitted.has_key(fname):
+			emitted[fname] = True
+			funclist.append(fname)
 
+	for o in meta['objects']:
+		if o.has_key('native'):
+			_emit(o['native'])
+
+		for p in o['properties']:
+			v = p['value']
+			if isinstance(v, dict) and v['type'] == 'lightfunc':
+				assert(v.has_key('native'))
+				_emit(v['native'])
+				print('Lightfunc function declaration: %r' % v['native'])
+
+	for fname in funclist:
 		# Visibility depends on whether the function is Duktape internal or user.
 		# Use a simple prefix for now.
 		if fname[:4] == 'duk_':
-			genc.emitLine('DUK_INTERNAL_DECL duk_ret_t %s(duk_context *ctx);' % o['native'])
+			genc.emitLine('DUK_INTERNAL_DECL duk_ret_t %s(duk_context *ctx);' % fname)
 		else:
-			genc.emitLine('extern duk_ret_t %s(duk_context *ctx);' % o['native'])
+			genc.emitLine('extern duk_ret_t %s(duk_context *ctx);' % fname)
 
 #
 #  Main
@@ -2781,7 +2931,7 @@ def main():
 	else:
 		gc_hdr.emitLine('#error ROM support not enabled, rerun make_dist.py with --rom-support')
 	gc_hdr.emitLine('#else')
-	emit_header_native_function_declarations(gc_hdr, rom_meta)
+	emit_header_native_function_declarations(gc_hdr, ram_meta)
 	emit_ramobj_header_nativefunc_array(gc_hdr, ram_native_funcs)
 	emit_ramobj_header_initjs(gc_hdr, initjs_data)
 	emit_ramobj_header_objects(gc_hdr, ram_meta)
