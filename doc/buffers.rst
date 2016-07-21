@@ -2,6 +2,9 @@
 Buffers
 =======
 
+FIXME: Duktape.Buffer removal
+FIXME: ArrayBuffer / plain buffer behavior
+
 Overview
 ========
 
@@ -49,14 +52,15 @@ type so various approaches are used:
   - https://nodejs.org/docs/v0.12.1/api/buffer.html
   - https://github.com/joyent/node/blob/master/lib/buffer.js
 
-* Duktape has its own custom types:
+* Duktape has a custom plain buffer type which has a minimal memory footprint:
 
-  - Plain buffer data type which can point to a fixed size buffer,
+  - The plain buffer data type which can point to a fixed size buffer,
     a dynamic (resizable) buffer, or an external (user allocated)
     buffer
 
-  - Duktape.Buffer() object wrapper for plain buffer values (similar
-    to how a String object wraps a plain string value)
+  - The plain buffer behaves like ArrayBuffer for Ecmascript code but maintains
+    separate typing in the C API.  It object coerces to an actual ``ArrayBuffer``
+    sharing the same underlying storage.
 
 * Blob (not very relevant):
 
@@ -75,8 +79,6 @@ Overview
 Duktape currently supports the following buffer and buffer-related values:
 
 * Plain Duktape buffer
-
-* Duktape.Buffer object
 
 * Node.js Buffer object
 
@@ -201,8 +203,6 @@ Summary of buffer-related values
 +===================+===============+================+=============+=============+====================+=========+=========+==============+===============+=====================+=============+==================+===================================+
 | plain buffer      | Duktape       | yes (bytes)    | yes         | yes         | yes                | no      | yes     | uint8        | uint8         | ToUint32() & 0xff   | n/a         | no               |                                   |
 +-------------------+---------------+----------------+-------------+-------------+--------------------+---------+---------+--------------+---------------+---------------------+-------------+------------------+-----------------------------------+
-| Duktape.Buffer    | Duktape       | yes (bytes)    | yes         | yes         | 1                  | no      | yes     | uint8        | uint8         | ToUint32() & 0xff   | n/a         | no               |                                   |
-+-------------------+---------------+----------------+-------------+-------------+--------------------+---------+---------+--------------+---------------+---------------------+-------------+------------------+-----------------------------------+
 | Buffer            | Node.js       | yes (bytes)    | yes         | yes         | 1                  | no      | yes     | uint8        | uint8         | ToUint32() & 0xff   | n/a         | yes              | Based on Node.js v0.12.1.         |
 +-------------------+---------------+----------------+-------------+-------------+--------------------+---------+---------+--------------+---------------+---------------------+-------------+------------------+-----------------------------------+
 | ArrayBuffer       | TypedArray    | yes (bytes)    | yes         | yes         | 1                  | no      | yes     | uint8        | uint8         | ToUint32() & 0xff   | n/a         | no               |                                   |
@@ -230,11 +230,8 @@ Summary of buffer-related values
 
 Notes:
 
-* A Duktape.Buffer object is a wrapper around a plain buffer value.
-  It provides a means to create Buffer values and convert a value to a
-  buffer.  Duktape.Buffer.prototype provides buffer handling methods
-  which are also usable for plain buffer values due to automatic object
-  promotion.
+* A plain buffer mimics an ArrayBuffer wherever possible, and inherits
+  methods and other properties through ``ArrayBuffer.prototype``.
 
 * DataView and Node.js Buffer inherit a set of accessor methods from their
   prototype.  These accessors allow fields of different width and type to
@@ -270,12 +267,6 @@ Built-in objects related to buffers
 Duktape plain buffer value:
 
 * None
-
-Duktape.Buffer:
-
-* Duktape.Buffer
-
-* Duktape.Buffer.prototype
 
 Node.js Buffer:
 
@@ -347,9 +338,9 @@ As a general rule:
 * Any Buffer object/view (implemented internally as a ``duk_hbufobj``)
   is accepted by any API expecting a specific object/view.  For example,
   Khronos DataView() constructor accepts a Node.js Buffer, and Node.js
-  Buffer() accepts a Duktape.Buffer as an input.
+  Buffer() accepts a Uint8Array as an input.
 
-* A plain Duktape buffer is accepted as if it was coerced to a Duktape.Buffer.
+* A plain Duktape buffer is accepted as if it was coerced to an ArrayBuffer
   (This is not always the case now, e.g. for typed array constructors.)
 
 This general rules is complicated by a few practical issues:
@@ -436,8 +427,6 @@ Specification notes:
 
 Implementation notes
 --------------------
-
-* Share Duktape.Buffer exotic behavior for indices and "length".
 
 * Representation must point to a plain buffer and also needs internal slice
   offset/length properties to implement slice semantics.  Slices must be
@@ -627,8 +616,7 @@ Implementation notes
 --------------------
 
 * ArrayBuffer wraps an underlying buffer object.  A buffer object can be
-  "neutered".  ArrayBuffer is similar to Duktape.Buffer; eliminate
-  Duktape.Buffer?
+  "neutered".
 
 * ArrayBufferView classes and DataView refer to an underlying ArrayBuffer,
   and may have an offset.  These could be implemented similar to Node.js
@@ -1081,9 +1069,9 @@ Unsorted future work
 * Implement and test for integer arithmetic wrap checks e.g. when coercing
   an index into a byte offset by shifting.
 
-* Accept a plain buffer everywhere where a Duktape.Buffer, ArrayBuffer, or
-  Node.js Buffer would be accepted, coercing the plain buffer automatically
-  to a full object (either conceptually or concretely)?
+* Accept a plain buffer everywhere where an ArrayBuffer or a Node.js Buffer
+  would be accepted, coercing the plain buffer automatically to a full object
+  (either conceptually or concretely)?
 
 * duk_to_buffer(): coerce a Buffer object into a plain buffer value
   (similarly to how duk_to_string() coerces a String to a plain string)?
@@ -1095,19 +1083,8 @@ Unsorted future work
 
 * Other Duktape C API changes to interact with Buffer objects.
 
-* Duktape.Buffer.prototype.toString() and Duktape.Buffer.prototype.valueOf():
-  what should their behavior be for slices?  Currently slice information is
-  lost, same as if Duktape.Buffer(obj) was called.
-
 * Node.js Buffer.isBuffer(): what is the best behavior for plain buffer and
   other buffer object values?
-
-* ToObject() coercion for a plain buffer now results in Duktape.Buffer because
-  Duktape.Buffer is its "object counterpart" (similar to how a plain string
-  has a String counterpart).  This is consistent as a plain buffer also now
-  inherits properties from Duktape.Buffer.prototype.  It might make sense to
-  make ArrayBuffer the object counterpart for plain buffers and deprecate
-  Duktape.Buffer?
 
 * What to do with Node.js SlowBuffer, INSPECT_MAX_BYTES, and code that does
   ``require('buffer')``?

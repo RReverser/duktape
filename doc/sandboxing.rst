@@ -112,9 +112,10 @@ Risky bindings:
   it from sandboxed code.  You can still cherry pick individual functions to
   be exposed directly or through a wrapper.
 
-* ``Duktape.Buffer`` allows creation of buffers and internal keys (through
-  buffer-to-string coercion) and thus provides access to internal properties.
-  See separate section on internal properties.
+* Node.js ``Buffer``, ``ArrayBuffer``, and other buffer bindings allow creation
+  of buffers and internal keys (through buffer-to-string coercion) and thus
+  provides access to internal properties.  See separate section on internal
+  properties.
 
 * ``Duktape.dec()`` allows decoding of string data into a buffer value and thus
   provides access to internal properties.
@@ -163,7 +164,7 @@ changing its value can lead to a potentially exploitable segfault.
 To prevent access to internal keys:
 
 * Ensure that sandboxed code has no direct access to buffer values, either
-  by creating one using ``Duktape.Buffer`` or through some C binding which
+  by creating one using e.g. ``Buffer`` or through some C binding which
   returns a buffer value in some way.
 
 * Ensure that sandboxed code has minimal access to objects with potentially
@@ -260,7 +261,7 @@ objects which participate in implicit inheritance:
   through explicit construction (if constructors visible) or implicitly
   through internal errors, e.g. ``/foo\123/`` which throws a SyntaxError
 
-* ``Duktape.Buffer.prototype``: through buffer values (if available); since
+* ``ArrayBuffer.prototype``: through buffer values (if available); since
   there is no buffer literal, user cannot construct buffer values directly
 
 * ``Duktape.Pointer.prototype`` through pointer values (if available); since
