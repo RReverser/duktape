@@ -15,13 +15,8 @@
 <td>Plain buffer</td>
 <td>No<br />Duktape&nbsp;specific</td>
 <td>1.0</td>
-<td>Plain, primitive buffer value (not an object), similar to how a plain string relates to a String object</td>
-</tr>
-<tr>
-<td>Duktape.Buffer object</td>
-<td>No<br />Duktape&nbsp;specific</td>
-<td>1.0</td>
-<td>Object wrapped plain buffer, similar to how a String object relates to a plain string</td>
+<td>Plain, primitive buffer value (not an object), similar to how a plain string relates to a String object;
+    behaves like an ArrayBuffer instance where possible, object coerces to an actual <code>ArrayBuffer</code></td>
 </tr>
 <tr>
 <td>Node.js Buffer object</td>

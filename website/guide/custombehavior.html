@@ -209,9 +209,8 @@ following for more details on the fast path behavior:
 binding is the Khronos specification, not the full ES6 specification.
 There are some differences to Khronos/ES6, including:</p>
 <ul>
-<li>Interoperability with other buffer types: Duktape.Buffer or Node.js
-    Buffer is allowed wherever an ArrayBuffer or a view object would be
-    allowed.</li>
+<li>Interoperability with other buffer types: Node.js Buffer is usually
+    allowed wherever an ArrayBuffer or a view object would be allowed.</li>
 <li>Small differences in argument coercion e.g. for offset and length
     values.</li>
 <li>ArrayBuffer has numeric indices (behaving like Uint8Array), and
@@ -229,9 +228,9 @@ There are some differences to Khronos/ES6, including:</p>
 some differences between the Node.js behavior and Duktape behavior.  These
 differences include:</p>
 <ul>
-<li>Interoperability with other buffer types: Duktape.Buffer, ArrayBuffer,
-    DataView, or a typed array (Uint8Array etc) is allowed wherever a Node.js
-    Buffer would be allowed.</li>
+<li>Interoperability with other buffer types: ArrayBuffer, DataView, or a
+    typed array (Uint8Array etc) is usually allowed wherever a Node.js Buffer
+    would be allowed.</li>
 <li>Buffer data is always zeroed on allocation and when concatenation
     <code>totalLength</code> exceeds combined size of input buffers.</li>
 <li>Read/write offset and length arguments are always validated to ensure

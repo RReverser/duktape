@@ -7,7 +7,7 @@ stack: |
   [ ... val! ... ]
 
 summary: |
-  <p>Get the data pointer for a plain buffer or a Buffer object (Duktape.Buffer,
+  <p>Get the data pointer for a plain buffer or a Buffer object (Duktape.Buffer,  <!--FIXME-->
   Node.js Buffer, ArrayBuffer, DataView, or TypedArray view) value at
   <code>idx</code> without modifying or coercing the value.  Return a
   non-<code>NULL</code> pointer if the value is a valid buffer with a non-zero
