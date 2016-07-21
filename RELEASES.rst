@@ -1593,6 +1593,9 @@ Planned
 2.0.0 (XXXX-XX-XX)
 ------------------
 
+* Incompatible change: remove Duktape.Buffer custom built-in, ArrayBuffer
+  now serves its place (GH-875)
+
 * Incompatible change: rework buffer types and their Ecmascript and C API
   behavior: plain buffers now behave like ArrayBuffers and inherit from
   ArrayBuffer.prototype; there are a lot of associated small changes in
