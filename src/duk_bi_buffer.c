@@ -1,5 +1,5 @@
 /*
- *  Duktape.Buffer, Node.js Buffer, and Khronos/ES6 TypedArray built-ins
+ *  Khronos/ES6 TypedArray and Node.js Buffer built-ins
  */
 
 #include "duk_internal.h"
@@ -483,7 +483,7 @@ DUK_INTERNAL void duk_hbufobj_push_validated_read(duk_context *ctx, duk_hbufobj 
 		duk_push_uint(ctx, (duk_uint_t) du.uc[0]);
 		break;
 #if defined(DUK_USE_BUFFEROBJECT_SUPPORT)
-	/* These are not needed when only Duktape.Buffer is supported. */
+	/* These are not needed when only ArrayBuffer is supported. */
 	case DUK_HBUFOBJ_ELEM_INT8:
 		duk_push_int(ctx, (duk_int_t) (duk_int8_t) du.uc[0]);
 		break;
@@ -527,7 +527,7 @@ DUK_INTERNAL void duk_hbufobj_validated_write(duk_context *ctx, duk_hbufobj *h_b
 		du.uc[0] = (duk_uint8_t) duk_to_uint32(ctx, -1);
 		break;
 #if defined(DUK_USE_BUFFEROBJECT_SUPPORT)
-	/* These are not needed when only Duktape.Buffer is supported. */
+	/* These are not needed when only ArrayBuffer is supported. */
 	case DUK_HBUFOBJ_ELEM_UINT8CLAMPED:
 		du.uc[0] = (duk_uint8_t) duk_to_uint8clamped(ctx, -1);
 		break;
@@ -558,108 +558,6 @@ DUK_INTERNAL void duk_hbufobj_validated_write(duk_context *ctx, duk_hbufobj *h_b
 	}
 
 	DUK_MEMCPY((void *) p, (const void *) du.uc, (size_t) elem_size);
-}
-
-/*
- *  Duktape.Buffer: constructor
- */
-
-DUK_INTERNAL duk_ret_t duk_bi_buffer_constructor(duk_context *ctx) {
-	duk_hthread *thr;
-	duk_size_t buf_size;
-	duk_small_int_t buf_dynamic;
-	duk_uint8_t *buf_data;
-	const duk_uint8_t *src_data;
-
-	thr = (duk_hthread *) ctx;
-	DUK_UNREF(thr);
-
-	/*
-	 *  Constructor arguments are currently somewhat compatible with
-	 *  (keep it that way if possible):
-	 *
-	 *    http://nodejs.org/api/buffer.html
-	 *
-	 *  Note that the ToBuffer() coercion (duk_to_buffer()) does NOT match
-	 *  the constructor behavior.
-	 */
-
-	buf_dynamic = duk_get_boolean(ctx, 1);  /* default to false */
-
-	switch (duk_get_type(ctx, 0)) {
-	case DUK_TYPE_NUMBER: {
-		/* new buffer of specified size */
-		buf_size = (duk_size_t) duk_to_int(ctx, 0);
-		(void) duk_push_buffer(ctx, buf_size, buf_dynamic);
-		break;
-	}
-	case DUK_TYPE_BUFFER: {
-		/* return input buffer, converted to a Duktape.Buffer object
-		 * if called as a constructor (no change if called as a
-		 * function).
-		 */
-		duk_set_top(ctx, 1);
-		break;
-	}
-	case DUK_TYPE_STRING: {
-		/* new buffer with string contents */
-		src_data = (const duk_uint8_t *) duk_get_lstring(ctx, 0, &buf_size);
-		DUK_ASSERT(src_data != NULL);  /* even for zero-length string */
-		buf_data = (duk_uint8_t *) duk_push_buffer(ctx, buf_size, buf_dynamic);
-		DUK_MEMCPY((void *) buf_data, (const void *) src_data, (size_t) buf_size);
-		break;
-	}
-	case DUK_TYPE_OBJECT: {
-		/* For all duk_hbufobjs, get the plain buffer inside
-		 * without making a copy.  This is compatible with Duktape 1.2
-		 * but means that a slice/view information is ignored and the
-		 * full underlying buffer is returned.
-		 *
-		 * If called as a constructor, a new Duktape.Buffer object
-		 * pointing to the same plain buffer is created below.
-		 */
-		duk_hbufobj *h_bufobj;
-		h_bufobj = (duk_hbufobj *) duk_get_hobject(ctx, 0);
-		DUK_ASSERT(h_bufobj != NULL);
-		if (!DUK_HOBJECT_IS_BUFOBJ((duk_hobject *) h_bufobj)) {
-			return DUK_RET_TYPE_ERROR;
-		}
-		if (h_bufobj->buf == NULL) {
-			return DUK_RET_TYPE_ERROR;
-		}
-		duk_push_hbuffer(ctx, h_bufobj->buf);
-		break;
-	}
-	case DUK_TYPE_NONE:
-	default: {
-		return DUK_RET_TYPE_ERROR;
-	}
-	}
-	DUK_ASSERT(duk_is_buffer(ctx, -1));
-
-	/* stack is unbalanced, but: [ <something> buf ] */
-
-	if (duk_is_constructor_call(ctx)) {
-		duk_hbufobj *h_bufobj;
-		duk_hbuffer *h_val;
-
-		h_val = duk_get_hbuffer(ctx, -1);
-		DUK_ASSERT(h_val != NULL);
-
-		h_bufobj = duk_push_bufobj_raw(ctx,
-		                               DUK_HOBJECT_FLAG_EXTENSIBLE |
-		                               DUK_HOBJECT_FLAG_BUFOBJ |
-		                               DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_BUFFER),
-		                               DUK_BIDX_BUFFER_PROTOTYPE);
-		DUK_ASSERT(h_bufobj != NULL);
-
-		duk__set_bufobj_buffer(ctx, h_bufobj, h_val);
-
-		DUK_ASSERT_HBUFOBJ_VALID(h_bufobj);
-	}
-	/* Note: unbalanced stack on purpose */
-
-	return 1;
 }
 
 /*
@@ -1209,8 +1107,8 @@ DUK_INTERNAL duk_ret_t duk_bi_dataview_constructor(duk_context *ctx) {
 	 * is e.g. a DataView or another TypedArray view.
 	 *
 	 * XXX: Copy .buffer property from a DataView/TypedArray argument?
-	 * Create a fresh ArrayBuffer for Duktape.Buffer and Node.js Buffer
-	 * arguments?  See: test-bug-dataview-buffer-prop.js.
+	 * Create a fresh ArrayBuffer for Node.js Buffer argument?
+	 * See: test-bug-dataview-buffer-prop.js.
 	 */
 
 	duk_dup(ctx, 0);
@@ -1310,67 +1208,6 @@ DUK_INTERNAL duk_ret_t duk_bi_nodejs_buffer_tostring(duk_context *ctx) {
 }
 #else  /* DUK_USE_BUFFEROBJECT_SUPPORT */
 DUK_INTERNAL duk_ret_t duk_bi_nodejs_buffer_tostring(duk_context *ctx) {
-	DUK_UNREF(ctx);
-	return DUK_RET_ERROR;
-}
-#endif  /* DUK_USE_BUFFEROBJECT_SUPPORT */
-
-/*
- *  Duktape.Buffer: toString(), valueOf()
- */
-
-#if defined(DUK_USE_BUFFEROBJECT_SUPPORT)
-DUK_INTERNAL duk_ret_t duk_bi_buffer_prototype_tostring_shared(duk_context *ctx) {
-	duk_hthread *thr;
-	duk_tval *tv;
-	duk_small_int_t to_string = duk_get_current_magic(ctx);
-
-	thr = (duk_hthread *) ctx;
-	DUK_UNREF(thr);
-
-	tv = duk_get_borrowed_this_tval(ctx);
-	DUK_ASSERT(tv != NULL);
-
-	if (DUK_TVAL_IS_BUFFER(tv)) {
-		duk_hbuffer *h_buf;
-		h_buf = DUK_TVAL_GET_BUFFER(tv);
-		DUK_ASSERT(h_buf != NULL);
-		duk_push_hbuffer(ctx, h_buf);
-	} else if (DUK_TVAL_IS_OBJECT(tv)) {
-		duk_hobject *h;
-		duk_hbufobj *h_bufobj;
-
-		/* Accept any duk_hbufobj, though we're only normally
-		 * called for Duktape.Buffer values.
-		 */
-		h = DUK_TVAL_GET_OBJECT(tv);
-		DUK_ASSERT(h != NULL);
-		if (!DUK_HOBJECT_IS_BUFOBJ(h)) {
-			DUK_DD(DUK_DDPRINT("toString/valueOf() called for a non-bufobj object"));
-			goto type_error;
-		}
-		h_bufobj = (duk_hbufobj *) h;
-		DUK_ASSERT_HBUFOBJ_VALID(h_bufobj);
-
-		if (h_bufobj->buf == NULL) {
-			DUK_DD(DUK_DDPRINT("toString/valueOf() called for a bufobj with NULL buf"));
-			goto type_error;
-		}
-		duk_push_hbuffer(ctx, h_bufobj->buf);
-	} else {
-		goto type_error;
-	}
-
-	if (to_string) {
-		(void) duk_buffer_to_string(ctx, -1);
-	}
-	return 1;
-
- type_error:
-	return DUK_RET_TYPE_ERROR;
-}
-#else  /* DUK_USE_BUFFEROBJECT_SUPPORT */
-DUK_INTERNAL duk_ret_t duk_bi_buffer_prototype_tostring_shared(duk_context *ctx) {
 	DUK_UNREF(ctx);
 	return DUK_RET_ERROR;
 }
