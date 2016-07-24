@@ -9,11 +9,42 @@ var isLittleEndian;
 var isMixedDouble;
 
 // Detect plain buffer, in Duktape 2.x plain buffers mimic ArrayBuffer so check
-// indirectly.
+// indirectly via the API type tag.
 function isPlainBuffer(x) {
     var tag;
     tag = Duktape.info(x)[0];  // api tag, 7=plain buffer, 6=object
     return tag === 7;
+}
+
+// Create a plain buffer similar to Duktape.Buffer() did in Duktape 1.x.
+// Because this idiom is liable to change, test cases should go through
+// this helper.
+function createPlainBuffer(len) {
+    var res = 'FIXME';
+    if (!isPlainBuffer(res)) {
+        throw new Error('createPlainBuffer() failed to create a plain buffer');
+    }
+    return res;
+}
+
+// Get the underlying plain buffer (ignoring slice information) of a plain
+// buffer or a buffer object.
+function getPlainBuffer(buf) {
+    var res = 'FIXME';
+    if (!isPlainBuffer(res)) {
+        throw new Error('toPlainBuffer() failed to create a plain buffer');
+    }
+    return res;
+}
+
+// Coerce a plain buffer or a buffer object into a plain buffer, respecting
+// slice information.  Returned value is always a copy.
+function toPlainBuffer(buf) {
+    var res = 'FIXME';
+    if (!isPlainBuffer(res)) {
+        throw new Error('toPlainBuffer() failed to create a plain buffer');
+    }
+    return res;
 }
 
 // Helper to print out TypedArray prototype chains.
@@ -22,8 +53,6 @@ function getPrototypeChain(x) {
     var protos = [
         { ref: Object.prototype, name: 'Object.prototype' },
         { ref: Array.prototype, name: 'Array.prototype' },
-
-        { ref: Duktape.Buffer.prototype, name: 'Duktape.Buffer.prototype' },
 
         { ref: ArrayBuffer.prototype, name: 'ArrayBuffer.prototype' },
         { ref: DataView.prototype, name: 'DataView.prototype' },
@@ -102,12 +131,14 @@ function getTestObjectList() {
     return values;
 }
 
+// FIXME: wrong place
 // Number to string, preserve negative zero sign.
 function num2str(v) {
     if (v !== 0) { return String(v); }
     return (1 / v > 0) ? '0' : '-0';
 }
 
+// FIXME: rename
 // Buffer/view to hex
 function buf2hex(b) {
     var res = [];
